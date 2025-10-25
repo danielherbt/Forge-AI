@@ -1,0 +1,5 @@
+{
+  "name": "Component Forge AI",
+  "description": "A conceptual architecture for a visual system that allows creating web components like in Figma, but automatically generating clean, modular, and reusable code for multiple frameworks (React, Vue, Svelte, Web Components).",
+  "requestFramePermissions": []
+}
