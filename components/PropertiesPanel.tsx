@@ -56,7 +56,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ element, onUpdate, on
         const override = componentStates[element.groupId]?.states
             .find(s => s.name === activeStateName)?.overrides[element.id]?.[prop];
         if (override !== undefined) {
-            return override;
+            // FIX: Use a type assertion because TypeScript cannot infer that `StateOverride[K]` (after a null check)
+            // is assignable to `CanvasElement[K]` for a generic `K`. This is a common limitation with
+            // correlated types in generics.
+            return override as CanvasElement[K];
         }
     }
     return element[prop];

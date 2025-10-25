@@ -80,7 +80,7 @@ const CanvasEditor: React.FC<CanvasEditorProps> = ({
   }, [viewTransform]);
   
   const addElement = (type: ShapeType) => {
-    const newElement: Partial<CanvasElement> & Pick<CanvasElement, 'id' | 'type'> = {
+    const newElementBase = {
       id: window.uuidv4(),
       type,
       x: 150,
@@ -88,20 +88,35 @@ const CanvasEditor: React.FC<CanvasEditorProps> = ({
       rotation: 0,
       fill: `hsl(${Math.random() * 360}, 70%, 70%)`,
     };
+
+    let newElement: CanvasElement;
+
     if (type === 'rect') {
-      newElement.width = 100;
-      newElement.height = 60;
-      newElement.cornerRadius = 0;
+      newElement = {
+        ...newElementBase,
+        width: 100,
+        height: 60,
+        cornerRadius: 0,
+      };
     } else if (type === 'circle') {
-      newElement.width = 80;
-      newElement.height = 80;
+      newElement = {
+        ...newElementBase,
+        width: 80,
+        height: 80,
+      };
     } else if (type === 'text') {
-      newElement.text = 'Hello World';
-      newElement.fontSize = 20;
-      newElement.width = 120;
-      newElement.height = 24;
+      newElement = {
+        ...newElementBase,
+        width: 120,
+        height: 24,
+        text: 'Hello World',
+        fontSize: 20,
+      };
+    } else {
+        return; // Should not happen
     }
-    setElements(prev => [...prev, newElement as CanvasElement]);
+
+    setElements(prev => [...prev, newElement]);
     setSelectedElementId(newElement.id);
   };
   
