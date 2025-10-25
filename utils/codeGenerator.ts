@@ -3,6 +3,8 @@ import { ComponentStates } from '../types/states';
 
 const camelToKebab = (str: string) => str.replace(/([a-z0-9]|(?=[A-Z]))([A-Z])/g, '$1-$2').toLowerCase();
 
+const getElementClassName = (el: CanvasElement) => `el-${el.id.substring(0, 8)}`;
+
 const elementToBaseStyle = (el: CanvasElement): React.CSSProperties => {
     const styles: React.CSSProperties = {
         position: 'absolute',
@@ -22,40 +24,71 @@ const elementToBaseStyle = (el: CanvasElement): React.CSSProperties => {
         styles.fontSize = `${el.fontSize}px`;
         styles.display = 'flex';
         styles.alignItems = 'center';
+        styles.justifyContent = 'center'; // Center text within the box
     }
     return styles;
 };
 
 const stylesToString = (styles: React.CSSProperties) => {
     return Object.entries(styles)
-        .filter(([, value]) => value !== undefined)
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
         .map(([key, value]) => `  ${camelToKebab(key)}: ${value};`)
         .join('\n');
 }
 
-const getElementClassName = (el: CanvasElement) => `el-${el.id.substring(0, 8)}`;
+export const generateComponentCss = (
+    elements: CanvasElement[],
+    componentStates?: ComponentStates[string],
+    options: { scope?: string } = {}
+): string => {
+    const styles: string[] = [];
+    const scopeSelector = options.scope ? `${options.scope} ` : '';
+
+    const containerWidth = elements.length > 0 ? Math.max(...elements.map(e => e.x + e.width)).toFixed(1) : 0;
+    const containerHeight = elements.length > 0 ? Math.max(...elements.map(e => e.y + e.height)).toFixed(1) : 0;
+    styles.push(`${scopeSelector}.container {\n  position: relative;\n  width: ${containerWidth}px;\n  height: ${containerHeight}px;\n}`);
+    
+    elements.forEach(el => {
+        styles.push(`${scopeSelector}.${getElementClassName(el)} {\n${stylesToString(elementToBaseStyle(el))}\n}`);
+        
+        componentStates?.states.forEach(state => {
+            const override = state.overrides[el.id];
+            if (override && Object.keys(override).length > 0) {
+                const stateSelector = state.name === 'hover'
+                    ? `${scopeSelector}.container:hover .${getElementClassName(el)}`
+                    : `${scopeSelector}.container.${state.name} .${getElementClassName(el)}`;
+
+                const overrideStyle: React.CSSProperties = {
+                   backgroundColor: override.fill && el.type !== 'text' ? override.fill : undefined,
+                   color: override.fill && el.type === 'text' ? override.fill : undefined,
+                   width: override.width ? `${override.width.toFixed(1)}px` : undefined,
+                   height: override.height ? `${override.height.toFixed(1)}px` : undefined,
+                   left: override.x ? `${override.x.toFixed(1)}px` : undefined,
+                   top: override.y ? `${override.y.toFixed(1)}px` : undefined,
+                   transform: override.rotation !== undefined ? `rotate(${override.rotation}deg)`: undefined,
+                   borderRadius: override.cornerRadius !== undefined ? `${override.cornerRadius}px` : undefined,
+                   fontSize: override.fontSize !== undefined ? `${override.fontSize}px` : undefined,
+                };
+                
+                const filteredOverrideStyle = Object.fromEntries(Object.entries(overrideStyle).filter(([, value]) => value !== undefined));
+
+                if (Object.keys(filteredOverrideStyle).length > 0) {
+                    styles.push(`${stateSelector} {\n${stylesToString(filteredOverrideStyle)}\n}`);
+                }
+            }
+        });
+    });
+
+    return styles.join('\n\n');
+}
+
 
 const generateReactCode = (elements: CanvasElement[], componentName: string, componentStates?: ComponentStates[string]): string => {
     const customStates = componentStates?.states.filter(s => s.name !== 'base' && s.name !== 'hover') || [];
     const props = customStates.map(s => `is${s.name.charAt(0).toUpperCase() + s.name.slice(1)}`).join(', ');
     const propsInterface = customStates.map(s => `  is${s.name.charAt(0).toUpperCase() + s.name.slice(1)}?: boolean;`).join('\n');
-
-    const styles: string[] = [];
-    elements.forEach(el => {
-        styles.push(`.${getElementClassName(el)} {\n${stylesToString(elementToBaseStyle(el))}\n}`);
-        componentStates?.states.forEach(state => {
-            const override = state.overrides[el.id];
-            if (override) {
-                const stateSelector = state.name === 'hover' ? `.${getElementClassName(el)}:hover` : `.${state.name} .${getElementClassName(el)}`;
-                const overrideStyle: React.CSSProperties = {
-                   backgroundColor: override.fill && el.type !== 'text' ? override.fill : undefined,
-                   color: override.fill && el.type === 'text' ? override.fill : undefined,
-                   // Add other overridable properties here
-                }
-                styles.push(`${stateSelector} {\n${stylesToString(overrideStyle)}\n}`);
-            }
-        });
-    });
+    
+    const css = generateComponentCss(elements, componentStates);
 
     const elementJSX = elements.map((el) => {
         if (el.type === 'text') {
@@ -63,8 +96,6 @@ const generateReactCode = (elements: CanvasElement[], componentName: string, com
         }
         return `        <div className="${getElementClassName(el)}"></div>`;
     }).join('\n');
-    
-    const containerClasses = customStates.map(s => `is${s.name.charAt(0).toUpperCase() + s.name.slice(1)} ? '${s.name}' : ''`).join(" + ' ' + ");
 
     return `import React from 'react';
 import './${componentName}.css';
@@ -90,21 +121,12 @@ export default ${componentName};
 
 /* In ${componentName}.css */
 /*
-.container {
-  position: relative;
-  width: ${Math.max(...elements.map(e => e.x + e.width)).toFixed(1)}px;
-  height: ${Math.max(...elements.map(e => e.y + e.height)).toFixed(1)}px;
-}
-${styles.join('\n\n')}
+${css}
 */
 `;
 };
 
-
-// Other frameworks would follow a similar logic of generating CSS and applying classes conditionally.
-// For brevity, only React is fully implemented here.
-
-export type Framework = 'React' | 'Vue' | 'Svelte' | 'Web Components';
+export type Framework = 'React' | 'Vue' | 'Svelte' | 'Web Components' | 'IR (JSON)';
 
 export const generateCode = (elements: CanvasElement[], framework: Framework, componentName = "MyComponent", componentStates?: ComponentStates[string]): string => {
     if (elements.length === 0) {
@@ -122,6 +144,12 @@ export const generateCode = (elements: CanvasElement[], framework: Framework, co
     }));
 
     switch(framework) {
+        case 'IR (JSON)':
+            const ir = {
+                elements: relativeElements,
+                states: componentStates?.states || [],
+            };
+            return JSON.stringify(ir, null, 2);
         case 'React':
             return generateReactCode(relativeElements, componentName, componentStates);
         case 'Vue':

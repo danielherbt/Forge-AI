@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { CanvasElement } from './CanvasEditor';
 import { Framework, generateCode } from '../utils/codeGenerator';
-import { CODE_EXAMPLES } from '../constants';
 import CodeBlock from './CodeBlock';
 import { ComponentStates } from '../types/states';
+import ComponentPreview from './ComponentPreview';
 
 interface ExportCodeModalProps {
   isOpen: boolean;
@@ -15,18 +15,50 @@ interface ExportCodeModalProps {
 
 type ExportScope = 'selection' | 'canvas';
 
-const ExportCodeModal: React.FC<ExportCodeModalProps> = ({ isOpen, onClose, elements, selectedElement, componentStates }) => {
+const ExportCodeModal: React.FC<ExportCodeModalProps> = ({ isOpen, onClose, elements: allElements, selectedElement, componentStates }) => {
   const [framework, setFramework] = useState<Framework>('React');
   const [scope, setScope] = useState<ExportScope>('canvas');
-  const [generatedCode, setGeneratedCode] = useState<string>('// Select options and click "Generate Code"');
+  const [generatedCode, setGeneratedCode] = useState<string>('// Select options and generate code to preview.');
+  const [activeCustomStates, setActiveCustomStates] = useState<string[]>([]);
+  
+  const { elementsToExport, statesToExport } = useMemo(() => {
+    let elements: CanvasElement[] = [];
+    let states: ComponentStates[string] | undefined;
+
+    if (scope === 'selection' && selectedElement) {
+      if (selectedElement.groupId) {
+        elements = allElements.filter(el => el.groupId === selectedElement.groupId);
+        states = componentStates[selectedElement.groupId];
+      } else {
+        elements = [selectedElement];
+      }
+    } else {
+      elements = allElements;
+    }
+    return { elementsToExport: elements, statesToExport: states };
+  }, [scope, selectedElement, allElements, componentStates]);
+  
+  const relativeElements = useMemo(() => {
+    if (elementsToExport.length === 0) return [];
+    
+    const minX = Math.min(...elementsToExport.map(el => el.x));
+    const minY = Math.min(...elementsToExport.map(el => el.y));
+
+    return elementsToExport.map(el => ({
+        ...el,
+        x: el.x - minX,
+        y: el.y - minY,
+    }));
+  }, [elementsToExport]);
+
+  const customStates = useMemo(() => 
+    statesToExport?.states.filter(s => s.name !== 'base' && s.name !== 'hover').map(s => s.name) || [], 
+    [statesToExport]
+  );
   
   const componentName = useMemo(() => {
     if (scope === 'selection' && selectedElement) {
-        const componentElements = selectedElement.groupId 
-            ? elements.filter(el => el.groupId === selectedElement.groupId)
-            : [selectedElement];
-        
-        const textElement = componentElements.find(el => el.type === 'text' && el.text);
+        const textElement = elementsToExport.find(el => el.type === 'text' && el.text);
         if(textElement && textElement.text) {
              const cleanName = textElement.text.replace(/[^a-zA-Z0-9]/g, '');
              const validName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
@@ -34,42 +66,35 @@ const ExportCodeModal: React.FC<ExportCodeModalProps> = ({ isOpen, onClose, elem
         }
     }
     return 'MyCanvasComponent';
-  }, [scope, selectedElement, elements]);
+  }, [scope, selectedElement, elementsToExport]);
 
   useEffect(() => {
-    setGeneratedCode('// Select options and click "Generate Code"');
-    if (selectedElement) {
-        setScope('selection');
-    } else {
-        setScope('canvas');
+    if (isOpen) {
+        const initialScope = selectedElement ? 'selection' : 'canvas';
+        setScope(initialScope);
+        setGeneratedCode(`// Click "Generate Code" to see the output for the '${initialScope}' scope.`);
+        setActiveCustomStates([]);
     }
   }, [isOpen, selectedElement]);
+  
+  const handleToggleState = (stateName: string) => {
+    setActiveCustomStates(prev => 
+      prev.includes(stateName) 
+        ? prev.filter(s => s !== stateName)
+        : [...prev, stateName]
+    );
+  };
 
   const handleGenerate = () => {
-    let elementsToExport: CanvasElement[] = [];
-    let statesToExport: ComponentStates[string] | undefined;
-
-    if (scope === 'selection' && selectedElement) {
-      if (selectedElement.groupId) {
-        elementsToExport = elements.filter(el => el.groupId === selectedElement.groupId);
-        statesToExport = componentStates[selectedElement.groupId];
-      } else {
-        elementsToExport = [selectedElement];
-        // No states for single elements
-      }
-    } else {
-      elementsToExport = elements;
-      // Note: Exporting states for the entire canvas is not supported in this model.
-      // It would require grouping all elements into a root component.
-    }
-
     const code = generateCode(elementsToExport, framework, componentName, statesToExport);
     setGeneratedCode(code);
   };
-
+  
   if (!isOpen) return null;
   
-  const lang = CODE_EXAMPLES[framework as keyof typeof CODE_EXAMPLES].lang;
+  const lang = framework === 'IR (JSON)' ? 'json' : 'jsx';
+
+  const frameworkOptions: Framework[] = ['React', 'Vue', 'Svelte', 'Web Components', 'IR (JSON)'];
 
   return (
     <div 
@@ -77,13 +102,13 @@ const ExportCodeModal: React.FC<ExportCodeModalProps> = ({ isOpen, onClose, elem
       onClick={onClose}
     >
       <div 
-        className="bg-slate-800 rounded-xl border border-slate-700 p-6 w-full max-w-3xl shadow-2xl flex flex-col"
+        className="bg-slate-800 rounded-xl border border-slate-700 p-6 w-full max-w-6xl shadow-2xl flex flex-col"
         style={{height: '90vh'}}
         onClick={e => e.stopPropagation()}
       >
-        <h2 className="text-xl font-bold text-white mb-4 flex-shrink-0">Export Component Code</h2>
+        <h2 className="text-xl font-bold text-white mb-4 flex-shrink-0">Export Component</h2>
         
-        <div className="flex flex-wrap items-center gap-4 mb-4 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-4 mb-4 flex-shrink-0 border-b border-slate-700 pb-4">
           <div>
             <label className="block text-sm font-medium text-slate-400 mb-1">Framework</label>
             <select
@@ -91,9 +116,7 @@ const ExportCodeModal: React.FC<ExportCodeModalProps> = ({ isOpen, onClose, elem
                 onChange={e => setFramework(e.target.value as Framework)}
                 className="bg-slate-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
             >
-              {Object.keys(CODE_EXAMPLES).map(lang => (
-                <option key={lang} value={lang}>{lang}</option>
-              ))}
+              {frameworkOptions.map(f => <option key={f} value={f}>{f}</option>)}
             </select>
           </div>
           <div>
@@ -107,9 +130,7 @@ const ExportCodeModal: React.FC<ExportCodeModalProps> = ({ isOpen, onClose, elem
               <option value="selection" disabled={!selectedElement}>Selected Component</option>
             </select>
           </div>
-
           <div className="flex-grow"></div>
-          
           <button
               onClick={handleGenerate}
               className="bg-sky-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-sky-600 transition-all shadow-lg shadow-sky-500/20 text-sm"
@@ -118,11 +139,46 @@ const ExportCodeModal: React.FC<ExportCodeModalProps> = ({ isOpen, onClose, elem
             </button>
         </div>
 
-        <div className="flex-grow min-h-0">
+        <div className="flex-grow grid md:grid-cols-2 gap-6 min-h-0">
+          <div className="flex flex-col gap-4 bg-slate-900/50 rounded-lg p-4">
+              <h3 className="text-lg font-bold text-white flex-shrink-0">Interactive Preview</h3>
+              <div className="flex-grow flex items-center justify-center overflow-hidden">
+                {relativeElements.length > 0 ? (
+                  <ComponentPreview
+                      elements={relativeElements}
+                      componentStates={statesToExport}
+                      activeCustomStates={activeCustomStates}
+                      componentId={(scope === 'selection' && selectedElement?.groupId) || 'canvas-preview'}
+                  />
+                ) : (
+                  <div className="text-slate-500 text-sm">Nothing to preview.</div>
+                )}
+              </div>
+              {customStates.length > 0 && (
+                <div className="flex-shrink-0 border-t border-slate-700 pt-3">
+                    <h4 className="text-sm font-semibold text-slate-300 mb-2">Toggle States:</h4>
+                    <div className="flex flex-wrap gap-x-4 gap-y-2">
+                        {customStates.map(stateName => (
+                          <label key={stateName} className="flex items-center gap-2 cursor-pointer">
+                             <input 
+                               type="checkbox"
+                               checked={activeCustomStates.includes(stateName)}
+                               onChange={() => handleToggleState(stateName)}
+                               className="h-4 w-4 bg-slate-700 border-slate-600 rounded text-sky-500 focus:ring-sky-500 focus:ring-offset-slate-800"
+                             />
+                             <span className="text-sm text-slate-300">{stateName}</span>
+                          </label>
+                        ))}
+                    </div>
+                </div>
+              )}
+          </div>
+          <div className="flex flex-col min-h-0">
             <CodeBlock code={generatedCode} language={lang} className="h-full rounded-md overflow-hidden"/>
+          </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-4 flex-shrink-0">
+        <div className="flex justify-end gap-3 pt-4 flex-shrink-0 mt-4 border-t border-slate-700">
             <button
               type="button"
               onClick={onClose}
